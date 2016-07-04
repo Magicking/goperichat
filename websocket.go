@@ -6,6 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 	"log"
 	"fmt"
+	"time"
 )
 
 type PeriscopeChatListener struct {
@@ -13,6 +14,10 @@ type PeriscopeChatListener struct {
 	pm PeriscopeMeta
 	cm PeriscopeMetaChat
 	done chan struct{}
+}
+
+func NewPeriscopeChatListener(pm PeriscopeMeta, cm PeriscopeMetaChat) *PeriscopeChatListener {
+	return &PeriscopeChatListener{pm: pm, cm: cm}
 }
 
 func (l *PeriscopeChatListener) Dial() error {
@@ -64,13 +69,22 @@ func (l *PeriscopeChatListener) initChat() error {
 	return nil
 }
 
+type RetryTimeout struct{}
+
+func (RetryTimeout) Error() string {
+	return "closed connection"
+}
+
 func (l *PeriscopeChatListener) Run() error {
+	var done bool
 	l.done = make(chan struct{})
 	go func() {
 		select {
 			case <-l.done:
+				// TODO Check on this
 				// To cleanly close a connection, a client should send a close
 				// frame and wait for the server to close the connection.
+				done = true
 				err := l.c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				if err != nil {
 					log.Println("write close:", err)
@@ -80,7 +94,11 @@ func (l *PeriscopeChatListener) Run() error {
 	}()
 	defer l.Stop()
 
+	fail_counter := 0
 	for {
+		if fail_counter == 3 { // Retry 3 times without waiting
+			return RetryTimeout{}
+		}
 		if err := l.Dial(); err != nil {
 			return err
 		}
@@ -90,10 +108,27 @@ func (l *PeriscopeChatListener) Run() error {
 		for {
 			_, msg, err := l.c.ReadMessage()
 			if err != nil {
+				if done {
+					return err
+				}
+				//if websocket.IsCloseError()//TODO CHECK DOC
 				log.Println("read:", err)
+				fail_counter++
 				break
 			}
-			fmt.Printf("%s", msg)
+			fail_counter = 0
+			pm, err := FrameFilter(msg)
+			if err != nil {
+				log.Println("FrameFilter:", err)
+				continue
+			}
+			if pm.Type == 1 {
+				if pm.Timestamp > 100000000000 { //WTF
+					pm.Timestamp /= 1000
+				}
+				tm := time.Unix(int64(pm.Timestamp), 0)
+				fmt.Printf("%s %s: %s\n",tm, pm.DisplayName, pm.Body)
+			}
 		}
 	}
 }

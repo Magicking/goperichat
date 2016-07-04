@@ -1,70 +1,13 @@
 package main
 
 import (
-	"net/http"
-	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
-	"flag"
+
+	"github.com/urfave/cli"
 )
-
-// We put only data we need in the struct
-type PeriscopeMeta struct {
-	ChatToken string `json:"chat_token"`
-	Broadcastinfo PeriscopeBroadcast `json:"broadcast"`
-}
-type PeriscopeBroadcast struct {
-	Id string `json:"id"`
-}
-
-type ChanPerms struct
-{
-	PB uint `json:"pb"`
-	CM uint `json:"cm"`
-}
-
-type PeriscopeMetaChat struct {
-	Subscriber string `json:"subscriber"`
-	Publisher string `json:"publisher"`
-	AuthToken string `json:"auth_token"`
-	SignerKey string `json:"signer_key"`
-	Channel string `json:"channel"`
-	ShouldVerifySignature bool `json:"should_verify_signature"`
-	AccessToken string `json:"access_token"`
-	Endpoint string `json:"endpoint"`
-	RoomId string `json:"room_id"`
-	ParticipantIndex uint `json:"participant_index"`
-	ReadOnly bool `json:"read_only"`
-	ShouldLog bool `json:"should_log"`
-	ChanPerm ChanPerms `json:"chan_perms"`
-}
-
-var urlVideoPublic = "https://api.periscope.tv/api/v2/accessVideoPublic?broadcast_id="
-var urlChatPublic = "https://api.periscope.tv/api/v2/accessChatPublic?chat_token="
-
-func toJsonOrPanic(v interface{}) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
-func getJson(out interface{}, baseUrl, id string) error {
-	url := baseUrl + id
-	res, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-    err = json.NewDecoder(res.Body).Decode(out)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
 func init() {
 	interrupt := make(chan os.Signal, 1)
@@ -78,21 +21,52 @@ func init() {
 	}()
 }
 
-var idStream = flag.String("id", "", "ID of the streaming")
+func startNewListener(id string) *PeriscopeChatListener {
+	pm, err := GetPeriscopeMeta(id)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cm, err := GetPeriscopeMetaChat(pm.ChatToken)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pcl := NewPeriscopeChatListener(*pm, *cm)
+	err = pcl.Run()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return pcl
+}
 
 func main() {
-	flag.Parse()
+	app := cli.NewApp()
+	app.Name = "GoPerichat"
+	app.Usage = "No usage"
 
-	var pm PeriscopeMeta
-	err := getJson(&pm, urlVideoPublic, *idStream)
-	if err != nil {
-		log.Fatal(err)
+	app.Flags = []cli.Flag {
+		cli.StringFlag{
+			Name:	"id",
+			Usage:	"Stream ID",
+			EnvVar:	"STREAM_ID",
+		},
 	}
-	var cm PeriscopeMetaChat
-	err = getJson(&cm, urlChatPublic,  pm.ChatToken)
-	if err != nil {
-		log.Fatal(err)
+
+	app.Action = func (c* cli.Context) error {
+		if c.String("id") == "" {
+			return errors.New("No id given")
+		}
+		startNewListener(c.String("id"))
+		return nil
 	}
-	pcl := PeriscopeChatListener{pm: pm, cm: cm}
-	pcl.Run()
+	app.Run(os.Args)
+
+	// For MQTT
+	// Connect to MQTT
+	// Register Topic
+	// On new message launch new recorder
+	/*
+	opts.AddBroker(server)
+	opts.SetUsername(username)
+	opts.SetPassword(password)
+	*/
 }
