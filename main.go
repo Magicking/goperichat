@@ -21,7 +21,7 @@ func init() {
 	}()
 }
 
-func startNewListener(id string) *PeriscopeChatListener {
+func startNewListener(id string, c chan LineEntry) *PeriscopeChatListener {
 	pm, err := GetPeriscopeMeta(id)
 	if err != nil {
 		log.Fatal(err)
@@ -31,7 +31,7 @@ func startNewListener(id string) *PeriscopeChatListener {
 		log.Fatal(err)
 	}
 	pcl := NewPeriscopeChatListener(*pm, *cm)
-	err = pcl.Run()
+	err = pcl.Run(c)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,7 +55,8 @@ func main() {
 		if c.String("id") == "" {
 			return errors.New("No id given")
 		}
-		startNewListener(c.String("id"))
+		sl := NewStatsLive(WordFreq)
+		startNewListener(c.String("id"), sl.C)
 		return nil
 	}
 	app.Run(os.Args)

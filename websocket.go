@@ -5,8 +5,6 @@ import (
 	"bytes"
 	"github.com/gorilla/websocket"
 	"log"
-	"fmt"
-	"time"
 )
 
 type PeriscopeChatListener struct {
@@ -75,9 +73,13 @@ func (RetryTimeout) Error() string {
 	return "closed connection"
 }
 
-func (l *PeriscopeChatListener) Run() error {
+func (l *PeriscopeChatListener) Run(c chan LineEntry) error {
 	var done bool
+	var le LineEntry
+
 	l.done = make(chan struct{})
+	le.Id = l.cm.RoomId
+
 	go func() {
 		select {
 			case <-l.done:
@@ -90,6 +92,9 @@ func (l *PeriscopeChatListener) Run() error {
 					log.Println("write close:", err)
 				}
 				l.c.Close()
+
+				le.Type = 0
+				c <- le
 		}
 	}()
 	defer l.Stop()
@@ -123,11 +128,10 @@ func (l *PeriscopeChatListener) Run() error {
 				continue
 			}
 			if pm.Type == 1 {
-				if pm.Timestamp > 100000000000 { //WTF
-					pm.Timestamp /= 1000
-				}
-				tm := time.Unix(int64(pm.Timestamp), 0)
-				fmt.Printf("%s %s: %s\n",tm, pm.DisplayName, pm.Body)
+				le.Type = 1
+				le.Timestamp = pm.Timestamp
+				le.Data = pm.Body
+				c <- le
 			}
 		}
 	}
